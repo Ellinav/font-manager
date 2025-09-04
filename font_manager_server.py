@@ -181,7 +181,7 @@ async def get_login_page():
     """)
 @app.get("/admin", response_class=HTMLResponse)
 async def get_admin_page():
-    # --- v5.1 - 新增字体预览功能 (完整版) ---
+    # --- v5.2 - 根据用户建议，新增独立的字体预览面板 ---
     html_content = """
     <!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><title>字体管理面板</title>
     <style>
@@ -191,7 +191,7 @@ async def get_admin_page():
         h2{margin-top:0;border-bottom:1px solid #555;padding-bottom:10px}
         .form-grid{display:grid;grid-template-columns:auto 1fr;gap:15px;align-items:center}
         label{font-weight:bold;text-align:right}
-        input,select,button{padding:10px;background:#3c3c3c;border:1px solid #555;border-radius:4px;color:#f0f0f0;box-sizing:border-box}
+        input,select,button,textarea{padding:10px;background:#3c3c3c;border:1px solid #555;border-radius:4px;color:#f0f0f0;box-sizing:border-box; font-size: 1em;}
         .form-grid > button{background:#8ab4f8;color:#1a1a1a;font-weight:700;cursor:pointer;grid-column:1/-1}
         #font-list table{width:100%;border-collapse:collapse;margin-top:1em}
         #font-list th,#font-list td{padding:12px;text-align:left;border-bottom:1px solid #444;vertical-align:middle}
@@ -204,35 +204,91 @@ async def get_admin_page():
         .action-btn{border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;margin-right:8px}
         .edit-btn{background-color:#1976d2} .edit-btn:hover{background-color:#115293}
         .delete-btn{background-color:#da3633} .delete-btn:hover{background-color:#b92521}
+        /* --- 新增预览区样式 --- */
+        .preview-controls{display:flex;gap:15px;margin-bottom:15px}
+        #font-preview-select{flex-basis:250px;}
+        #font-preview-input{width:100%;min-height:100px;resize:vertical;font-size:24px;line-height:1.5;}
     </style>
     </head><body><div class="container"><h1>SillyTavern 字体管理面板</h1>
     <div class="panel"><h2>上传新字体</h2><form id="upload-form" class="form-grid">
         <label for="font-file-button">字体文件</label>
         <div class="file-upload-wrapper"><input type="file" id="font-file" name="font_file" accept=".ttf,.otf,.woff,.woff2" required><label for="font-file" id="font-file-button" class="file-upload-button">选择文件</label><span id="file-name-display">未选择任何文件</span></div>
-        <label for="font-family">字体别名 (font-family)</label><input type="text" id="font-family" name="font_family" placeholder="例如: 思源宋体" required>
+        <label for="font-family">字体别名 (font-family)</label><input type="text" id="font-family" name="font_family" placeholder="例如: 像素字" required>
         <label for="font-weight">字体粗细 (font-weight)</label><select id="font-weight" name="font_weight" required><option value="400" selected>400 - Normal</option><option value="700">700 - Bold</option><option value="100">100 - Thin</option><option value="200">200 - Extra Light</option><option value="300">300 - Light</option><option value="500">500 - Medium</option><option value="600">600 - Semi Bold</option><option value="800">800 - Extra Bold</option><option value="900">900 - Black</option></select>
         <label for="font-style">字体样式 (font-style)</label><select id="font-style" name="font_style" required><option value="normal" selected>Normal</option><option value="italic">Italic</option><option value="oblique">Oblique</option></select>
         <button type="submit">上传并配置</button></form></div>
+    
+    <div class="panel"><h2>字体效果实时预览</h2>
+        <div class="preview-controls">
+            <select id="font-preview-select"><option value="">-- 请选择一个字体 --</option></select>
+        </div>
+        <textarea id="font-preview-input" placeholder="在这里输入文字来预览效果...">The quick brown fox jumps over the lazy dog. 1234567890</textarea>
+    </div>
+
     <div class="panel"><h2>已安装字体列表</h2><div id="font-list"><p class="loading">正在加载...</p></div></div></div>
     <script>
     document.addEventListener('DOMContentLoaded',()=>{
         const apiKey=localStorage.getItem('fontManagerApiKey'); if(!apiKey){window.location.href='/';return}
         const fontListDiv=document.getElementById('font-list'); const uploadForm=document.getElementById('upload-form');
         const fileInput=document.getElementById('font-file'); const fileNameDisplay=document.getElementById('file-name-display');
+        
+        // --- 新增预览区元素引用 ---
+        const fontPreviewSelect = document.getElementById('font-preview-select');
+        const fontPreviewInput = document.getElementById('font-preview-input');
+
         fileInput.addEventListener('change',()=>{fileNameDisplay.textContent=fileInput.files.length>0?fileInput.files[0].name:'未选择任何文件'});
-        async function loadFonts(){try{const response=await fetch('/api/list-fonts',{headers:{'Authorization':`Bearer ${apiKey}`}});if(response.status===401){alert('认证失败，请重新登录。');window.location.href='/';return}if(!response.ok)throw new Error('服务器错误: '+response.status);const fonts=await response.json();let html='<table><thead><tr><th>CSS 别名 (预览)</th><th>文件名</th><th>操作</th></tr></thead><tbody>';if(fonts.length===0){html+='<tr><td colspan="3" style="text-align:center">当前没有已配置的字体。</td></tr>'}else{fonts.forEach(f=>{html+=`
+        
+        async function loadFonts(){
+            try{
+                const response=await fetch('/api/list-fonts',{headers:{'Authorization':`Bearer ${apiKey}`}});
+                if(response.status===401){alert('认证失败，请重新登录。');window.location.href='/';return}
+                if(!response.ok)throw new Error('服务器错误: '+response.status);
+                const fonts=await response.json();
+                
+                // --- 渲染字体列表 (已移除之前的内联预览样式) ---
+                let tableHtml='<table><thead><tr><th>CSS 别名</th><th>文件名</th><th>操作</th></tr></thead><tbody>';
+                if(fonts.length===0){tableHtml+='<tr><td colspan="3" style="text-align:center">当前没有已配置的字体。</td></tr>'}
+                else{fonts.forEach(f=>{tableHtml+=`
                     <tr id="font-row-${f.fileName.replace(/[^a-zA-Z0-9]/g,'')}">
-                        <td class="font-family-cell" style="font-family: '${f.fontFamily}', sans-serif; font-size: 1.2em;">${f.fontFamily}</td>
+                        <td class="font-family-cell">${f.fontFamily}</td>
                         <td>${f.fileName}</td>
                         <td>
                           <button class="action-btn edit-btn" data-family="${f.fontFamily}" data-file="${f.fileName}">编辑</button>
                           <button class="action-btn delete-btn" data-family="${f.fontFamily}" data-file="${f.fileName}">删除</button>
                         </td>
-                    </tr>`})}html+='</tbody></table>';fontListDiv.innerHTML=html}catch(e){fontListDiv.innerHTML=`<p class="error">加载失败: ${e.message}`}}
+                    </tr>`})}
+                tableHtml+='</tbody></table>';
+                fontListDiv.innerHTML=tableHtml;
+
+                // --- 【【【新增】】】 动态填充预览下拉菜单 ---
+                let selectHtml = '<option value="">-- 请选择一个字体 --</option>';
+                fonts.forEach(f => {
+                    selectHtml += `<option value="${f.fontFamily}">${f.fontFamily}</option>`;
+                });
+                fontPreviewSelect.innerHTML = selectHtml;
+
+            }catch(e){fontListDiv.innerHTML=`<p class="error">加载失败: ${e.message}</p>`}
+        }
+
+        // --- 【【【新增】】】 更新预览效果的函数 ---
+        function updatePreview() {
+            const selectedFont = fontPreviewSelect.value;
+            if (selectedFont) {
+                fontPreviewInput.style.fontFamily = `'${selectedFont}', sans-serif`;
+            } else {
+                fontPreviewInput.style.fontFamily = ''; // 重置为默认字体
+            }
+        }
+
+        // --- 【【【新增】】】 为预览控件添加事件监听 ---
+        fontPreviewSelect.addEventListener('change', updatePreview);
+        fontPreviewInput.addEventListener('input', updatePreview); // 输入时也触发，虽然字体不变，但保持逻辑一致性
+
         uploadForm.addEventListener('submit',async e=>{e.preventDefault();if(fileInput.files.length===0){alert('请先选择一个字体文件！');return}const formData=new FormData();formData.append('font_file',fileInput.files[0]);formData.append('font_family',document.getElementById('font-family').value);formData.append('font_weight',document.getElementById('font-weight').value);formData.append('font_style',document.getElementById('font-style').value);const button=uploadForm.querySelector('button');button.disabled=true;button.textContent='上传中...';try{const response=await fetch('/api/upload-font',{method:'POST',headers:{'Authorization':`Bearer ${apiKey}`},body:formData});const result=await response.json();if(!response.ok){throw new Error(result.detail||'上传失败')}alert('上传成功！');uploadForm.reset();fileNameDisplay.textContent='未选择任何文件';await loadFonts()}catch(e){alert(`上传失败: ${e.message}`)}finally{button.disabled=false;button.textContent='上传并配置'}});
-        fontListDiv.addEventListener('click',async e=>{const btn=e.target;const fontFamily=btn.dataset.family;const fileName=btn.dataset.file;if(btn.classList.contains('delete-btn')){if(!confirm(`确定要删除字体'${fontFamily}'吗？\\n\\n此操作将删除文件并更新CSS，不可逆！`))return;try{const response=await fetch('/api/delete-font',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},body:JSON.stringify({fontFamily,fileName})});if(!response.ok){const err=await response.json();throw new Error(err.detail)}alert('删除成功！');document.getElementById(`font-row-${fileName.replace(/[^a-zA-Z0-9]/g,'')}`).remove()}catch(err){alert(`删除失败: ${err.message}`)}}
-        if(btn.classList.contains('edit-btn')){const newFontFamily=prompt('请输入新的字体别名 (font-family):',fontFamily);if(newFontFamily&&newFontFamily.trim()!==''&&newFontFamily!==fontFamily){try{const response=await fetch('/api/edit-font',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},body:JSON.stringify({oldFontFamily:fontFamily,newFontFamily,fileName})});if(!response.ok){const err=await response.json();throw new Error(err.detail)}alert('编辑成功！请记得去SillyTavern中更新对应的正则美化规则。');const row=document.getElementById(`font-row-${fileName.replace(/[^a-zA-Z0-9]/g,'')}`);row.querySelector('.font-family-cell').textContent=newFontFamily;btn.dataset.family=newFontFamily;row.querySelector('.delete-btn').dataset.family=newFontFamily}catch(err){alert(`编辑失败: ${err.message}`)}}}});
-        loadFonts()
+        fontListDiv.addEventListener('click',async e=>{const btn=e.target;const fontFamily=btn.dataset.family;const fileName=btn.dataset.file;if(btn.classList.contains('delete-btn')){if(!confirm(`确定要删除字体'${fontFamily}'吗？\\n\\n此操作将删除文件并更新CSS，不可逆！`))return;try{const response=await fetch('/api/delete-font',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},body:JSON.stringify({fontFamily,fileName})});if(!response.ok){const err=await response.json();throw new Error(err.detail)}alert('删除成功！');await loadFonts();}catch(err){alert(`删除失败: ${err.message}`)}}
+        if(btn.classList.contains('edit-btn')){const newFontFamily=prompt('请输入新的字体别名 (font-family):',fontFamily);if(newFontFamily&&newFontFamily.trim()!==''&&newFontFamily!==fontFamily){try{const response=await fetch('/api/edit-font',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},body:JSON.stringify({oldFontFamily:fontFamily,newFontFamily,fileName})});if(!response.ok){const err=await response.json();throw new Error(err.detail)}alert('编辑成功！请记得去SillyTavern中更新对应的正则美化规则。');await loadFonts();}catch(err){alert(`编辑失败: ${err.message}`)}}}});
+        
+        loadFonts();
     });
     </script></body></html>
     """
@@ -243,4 +299,5 @@ if __name__ == "__main__":
     logger.info(f"🚀 SillyTavern 字体管理面板 v5.0 正在启动...")
     logger.info(f"   - 容器内部监听端口: {default_port}")
     uvicorn.run(app, host="0.0.0.0", port=default_port)
+
 
