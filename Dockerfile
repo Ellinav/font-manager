@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 7860
 
 # 容器启动时运行的命令
-CMD ["uvicorn", "font_manager_server:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "font_manager_server:app", "--host", "0.0.0.0"]
