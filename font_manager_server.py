@@ -229,5 +229,7 @@ async def get_admin_page():
     """)
 # --- 主程序入口 ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8001))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    default_port = int(os.environ.get("PORT", 7860))
+    logger.info(f"🚀 SillyTavern 字体管理面板 v5.0 正在启动...")
+    logger.info(f"   - 容器内部监听端口: {default_port}")
+    uvicorn.run(app, host="0.0.0.0", port=default_port)
